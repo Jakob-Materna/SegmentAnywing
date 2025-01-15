@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 
 import gradio as gr
-import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import numpy as np
 import warnings
 import sys
 import torch
@@ -11,12 +11,15 @@ import cv2
 import csv
 import os
 import yaml
+
 from pathlib import Path
 from PIL import Image
 
 from matplotlib.backends.backend_agg import FigureCanvasAgg
+
 from scipy.ndimage import binary_fill_holes, label
 from scipy.ndimage import sum as ndimage_sum
+
 from segment_anything import sam_model_registry, SamPredictor
 
 
@@ -77,6 +80,7 @@ def parse_config(file_path):
         # Load wing cell data
         wing_cells = data["wing-cells"]
         sns_colors = sns.color_palette("hls", len(wing_cells))
+
         # Transform dictionary
         wing_segment_format = {}
         for i, (cell_id, display_name) in enumerate(wing_cells.items()):
@@ -115,16 +119,25 @@ def reset_points(original_image):
     return original_image, original_image, []
 
 
-def read_input_image(image_path):
+def reset_everything(predictor: SamPredictor, image_path, wing_segments):
     image_name = image_path.split("/")[-1]
     image = Image.open(image_path)
     image = np.asarray(image)
-    return image, image, image, image_name
 
-
-def sam_predict_mask(image, input_points, input_labels):
     predictor.set_image(image)
 
+    # Loop through each wing segment and reset 
+    for segment_name, segment_data in wing_segments.items():
+        segment_data["mask"] = None
+        segment_data["wing_area"] = None
+        segment_data["wing_height"] = None
+        segment_data["cell_area"] = None
+        segment_data["cell_perimeter"] = None
+
+    return predictor, image, image, image, image_name, wing_segments, []
+
+
+def sam_predict_mask(predictor: SamPredictor, input_points, input_labels):
     masks, _, _ = predictor.predict(
     point_coords=input_points,
     point_labels=input_labels,
@@ -181,16 +194,18 @@ def generate_mask_image(image, wing_segments):
     canvas = FigureCanvasAgg(fig)
     canvas.draw()
     buf = canvas.buffer_rgba()
+
     # Convert the buffer to a NumPy array (RGBA)
     image_rgba = np.asarray(buf)
     plt.close(fig)
 
     # Convert to RGB
     image_rgba = image_rgba[..., :3]
+
     return image_rgba
 
 
-def generate_mask(original_image, points, wing_segments):
+def generate_mask(predictor: SamPredictor, original_image, points, wing_segments):
     input_points = []
     input_labels = []
     cell = ""
@@ -207,10 +222,10 @@ def generate_mask(original_image, points, wing_segments):
     input_points = np.array(input_points)
     input_labels = np.array(input_labels)
 
-    mask = sam_predict_mask(original_image, input_points, input_labels)
+    # predictor.set_image(original_image)
+    mask = sam_predict_mask(predictor, input_points, input_labels)
     mask = postprocess_mask(mask)
     wing_segments[cell]["mask"] = mask
-    wing_segments[cell]["wing_area"] = np.sum(mask)
 
     mask_image = generate_mask_image(original_image, wing_segments)
     return mask_image, wing_segments
@@ -264,6 +279,8 @@ def calculate_cell_features(image, wing_segments):
             cell_perimeter = int(cv2.arcLength(cell_contour, closed=True))
             segment_data["cell_perimeter"] = cell_perimeter
 
+    return wing_segments
+
 
 def save_segmentation(image, wing_segments, image_name):
     # Calculate cell features
@@ -273,7 +290,7 @@ def save_segmentation(image, wing_segments, image_name):
     output_file_path = os.path.join(output_dir, "WingAreas.csv")
     header_written = os.path.exists(output_file_path)
 
-    # Save 
+    # Save wing segmentation data
     with open(output_file_path, mode="a", newline="") as file:
         writer = csv.DictWriter(file, fieldnames=["Filename", "VisibleWingAreaInPixels", "WingHeightInPixels", "Cell", "CellAreaInPixels", "CellPerimeterInPixels"])
         if not header_written:
@@ -284,10 +301,11 @@ def save_segmentation(image, wing_segments, image_name):
                 "VisibleWingAreaInPixels": segment_data["wing_area"],
                 "WingHeightInPixels": segment_data["wing_height"],
                 "Cell": segment_name,
-                "CellAreaInPixels": segment_data["wing_area"],
+                "CellAreaInPixels": segment_data["cell_area"],
                 "CellPerimeterInPixels": segment_data["cell_perimeter"]
             })
 
+    # Save mask image 
     output_subdir = output_dir + "/Wings/"
     os.makedirs(output_subdir, exist_ok=True)
     image = Image.fromarray(image)
@@ -308,6 +326,7 @@ def add_point(image, selection_mode, cell, points, evt: gr.SelectData):
     # Append new point
     new_points = points + [(x, y, selection_mode, cell)]
 
+    # Draw marker on a copy of the image
     image = image.copy()
     for (px, py, sel_mode, cell_type) in new_points:
         xi, yi = int(px), int(py)
@@ -323,6 +342,22 @@ def add_point(image, selection_mode, cell, points, evt: gr.SelectData):
     return image, image, new_points
 
 
+def get_sam_predictor(model_type, checkpoint_path):
+    # Select the device for computation. Cuda is preferred if it is available.
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    else:
+        device = torch.device("cpu")
+
+    # Set up sam predictor checkpoint
+    sam = sam_model_registry[model_type](checkpoint=checkpoint_path)
+    sam.to(device=device)
+
+    predictor = SamPredictor(sam)
+
+    return predictor
+
+
 if __name__ == "__main__":
     # Load the config file
     config_path = "config.yaml"  
@@ -334,20 +369,9 @@ if __name__ == "__main__":
     # Ignore warnings
     warnings.filterwarnings("ignore")
 
-    # Select the device for computation. Cuda is preferred if it is available.
-    if torch.cuda.is_available():
-        device = torch.device("cuda")
-    else:
-        device = torch.device("cpu")
-    
-    # Set up sam predictor checkpoint
-    sam = sam_model_registry[model_type](checkpoint=checkpoint_path)
-    sam.to(device=device)
-    
-    predictor = SamPredictor(sam)
-
-    # Create demo
+    # Create app
     with gr.Blocks() as demo:
+        predictor = gr.State(get_sam_predictor(model_type, checkpoint_path))
         points = gr.State([])
         original_image = gr.State(None)
         point_image = gr.State(None)
@@ -374,21 +398,21 @@ if __name__ == "__main__":
                 with gr.Row():
                     cell_options = gr.Dropdown(
                         choices=display_names, 
-                        label="Wing Cell"
+                        label="Wing cell"
                     )
                     selection_options = gr.Radio(
                         choices=["Positive", "Negative"],
                         value="Positive", 
                         label="Selection method"
                     )
-                undo_button = gr.Button("Clear Selection")
-                generate_mask_button = gr.Button("Generate Mask")
-                save_segmentation_button = gr.Button("Save Segmentation")
+                undo_button = gr.Button("Clear selection")
+                generate_mask_button = gr.Button("Generate mask")
+                save_segmentation_button = gr.Button("Save segmentation")
 
         input_image.upload(
-            fn=read_input_image,
-            inputs=input_image,
-            outputs=[output_image, original_image, point_image, image_name]
+            fn=reset_everything,
+            inputs=[predictor, input_image, wing_segments],
+            outputs=[predictor, output_image, original_image, point_image, image_name, wing_segments, points]
         )
 
         input_image.select(
@@ -411,7 +435,7 @@ if __name__ == "__main__":
 
         generate_mask_button.click(
             fn=generate_mask,
-            inputs=[original_image, points, wing_segments],
+            inputs=[predictor, original_image, points, wing_segments],
             outputs=[output_image, wing_segments]
         )
 
