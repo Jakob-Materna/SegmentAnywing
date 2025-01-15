@@ -1,8 +1,8 @@
-# Path to the checkpoint file. Possible models are vit_h, vit_l and vit_b.
+# Path to the checkpoint file. Possible models are vit_h, vit_l and vit_b
 checkpoint: "./checkpoints/sam_vit_h_4b8939.pth"
-# Path to the output file.
+# Path to the output file
 output-directory: "./output"
-# List of unique wing cell ids as they appear in the output file and their display names.
+# List of unique wing cell ids as they appear in the output file and their display names
 wing-cells:
   FWL: "forewing lobe"
   MC: "marginal cell"
