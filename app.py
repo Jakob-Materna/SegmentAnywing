@@ -116,7 +116,7 @@ def display_image(image):
 
 
 def reset_points(original_image):
-    return original_image, original_image, []
+    return original_image, original_image, [], "Positive"
 
 
 def reset_everything(predictor: SamPredictor, image_path, wing_segments):
@@ -134,7 +134,10 @@ def reset_everything(predictor: SamPredictor, image_path, wing_segments):
         segment_data["cell_area"] = None
         segment_data["cell_perimeter"] = None
 
-    return predictor, image, image, image, image_name, wing_segments, []
+    # Reset Dropdown to first option
+    display_names = [value["display_name"] for value in wing_segments.values()]
+    first_option = display_names[0]
+    return predictor, image, image, image, image_name, wing_segments, [], first_option, "Positive"
 
 
 def sam_predict_mask(predictor: SamPredictor, input_points, input_labels):
@@ -251,7 +254,7 @@ def calculate_cell_features(image, wing_segments):
     wing_contour = max(all_wing_contours, key=cv2.contourArea)
     
     # Calculate wing area
-    wing_area = cv2.contourArea(wing_contour)
+    wing_area = int(cv2.contourArea(wing_contour))
 
     # Find bounding Box
     x, y, w, h = cv2.boundingRect(wing_contour)
@@ -412,7 +415,7 @@ if __name__ == "__main__":
         input_image.upload(
             fn=reset_everything,
             inputs=[predictor, input_image, wing_segments],
-            outputs=[predictor, output_image, original_image, point_image, image_name, wing_segments, points]
+            outputs=[predictor, output_image, original_image, point_image, image_name, wing_segments, points, cell_options, selection_options]
         )
 
         input_image.select(
@@ -424,13 +427,13 @@ if __name__ == "__main__":
         cell_options.input(
             fn=reset_points,
             inputs=[original_image],
-            outputs=[input_image, point_image, points]
+            outputs=[input_image, point_image, points, selection_options]
         )
 
         undo_button.click(
             fn=reset_points,
             inputs=[original_image],
-            outputs=[input_image, point_image, points]
+            outputs=[input_image, point_image, points, selection_options]
         )
 
         generate_mask_button.click(
