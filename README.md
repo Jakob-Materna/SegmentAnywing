@@ -1,6 +1,6 @@
 # Segment Anywing
 
-[Segment Anything](https://segment-anything.com/) based segmentation tool created with [Gradio](https://gradio.app/). Select wing cells and calculate cell areas, perimeters wing height and area.
+[Segment-Anything](https://segment-anything.com/) based segmentation tool created with [Gradio](https://gradio.app/). Select wing cells and calculate cell areas, perimeters wing height and area.
 
 ![app-demo](https://github.com/user-attachments/assets/c2899e93-f444-462b-9568-9730df3e0243)
 
@@ -16,19 +16,6 @@ Install the required dependencies using conda and activate the environment:
 ```
 conda env create -f environment.yml
 conda activate anywing
-```
-
-Install [Segment Anything](https://github.com/facebookresearch/segment-anything#installation) with pip:
-
-```
-pip install git+https://github.com/facebookresearch/segment-anything.git
-```
-
-or clone the repository and install: 
-
-```
-git clone git@github.com:facebookresearch/segment-anything.git
-cd segment-anything; pip install -e .
 ```
 
 Create a new directory named `checkpoints` and download the basic [model checkpoint](https://github.com/facebookresearch/segment-anything#model-checkpoints). Alternativly, you can specify the path to the checkpoint in the `config.yaml`:
